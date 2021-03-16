@@ -1,0 +1,310 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="theme-color" content="#000000" />
+        <meta
+                name="description"
+                content="WebApp 6998 A2"
+        />
+        <title>6998 Web APP</title>
+        <style>
+            body {background-color: #282c34;
+                min-height: 100vh;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                font-size: calc(10px + 2vmin);
+                color: white;}
+        </style>
+        <script type="text/javascript" src="lib/axios/dist/axios.standalone.js"></script>
+        <script type="text/javascript" src="lib/CryptoJS/rollups/hmac-sha256.js"></script>
+        <script type="text/javascript" src="lib/CryptoJS/rollups/sha256.js"></script>
+        <script type="text/javascript" src="lib/CryptoJS/components/hmac.js"></script>
+        <script type="text/javascript" src="lib/CryptoJS/components/enc-base64.js"></script>
+        <script type="text/javascript" src="lib/url-template/url-template.js"></script>
+        <script type="text/javascript" src="lib/apiGatewayCore/sigV4Client.js"></script>
+        <script type="text/javascript" src="lib/apiGatewayCore/apiGatewayClient.js"></script>
+        <script type="text/javascript" src="lib/apiGatewayCore/simpleHttpClient.js"></script>
+        <script type="text/javascript" src="lib/apiGatewayCore/utils.js"></script>
+        <script type="text/javascript" src="apigClient.js"></script>
+        <script src="https://sdk.amazonaws.com/js/aws-sdk-2.864.0.min.js"></script>
+    </head>
+
+    <body>
+
+
+
+
+    <img src = "https://lh3.googleusercontent.com/proxy/djd2iVPIK0Zz0Ij_a6CNwemV95245aKG_Ow-03qWPjpT4NwqHzXd8XyGkyOGsMCi3Vs59RSBgpXsv7NDOa87EL2K" width="100" height="70">
+    <h1>
+        Let's search an image!
+    </h1>
+    <input type = "text" style = "background-color:#282c34;height: 4vh;width: 40vh; border: 2px solid #008CBA;font-size: medium;"
+            placeholder="Search.." id="Search-string"/>
+
+    <button type="submit" style="margin-top:10px;height: 8vh;width: 25vh;border: 2px solid #008CBA;
+            font-size: medium;" onclick="search_query()">Search!</button>
+
+    <button type="submit" style="margin-top:10px;height: 8vh;width: 25vh;border: 2px solid #008CBA;
+            font-size: medium;" onclick="startButton(event)" id="start_button"><img id="start_img" src="mic.gif" alt="Start">
+            </button>
+
+    <p>Or you can upload an image with personalized tags!</p>
+
+    <!--<label for="file" style="cursor: pointer;">Upload Image</label>-->
+    <p><input type="file"  accept="image/*" name="image" id="file"  onchange="loadFile(event)"></p>
+    <p>You can give the image some tags by typing in the box below:</p>
+    <input type = "text" style = "background-color:#282c34;height: 4vh;width: 40vh; border: 2px solid #008CBA;font-size: medium;"
+           placeholder="Give me some tags.." id="Upload-tags"/>
+    <button type="submit" style="margin-top:10px;height: 5vh;width: 15vh;border: 2px solid #008CBA;
+            font-size: medium;" onclick="collecting_tags_from_input()">Upload!</button>
+
+    <p><img id="output" width="200" /></p>
+
+    </body>
+</html>
+
+<script>
+var img_container = [];
+var apigClient = apigClientFactory.newClient({});
+
+var loadFile = function(event) {
+	var image = document.getElementById('output');
+	image.src = URL.createObjectURL(event.target.files[0]);
+};
+
+///Part for search the image and display the image.
+var search_query = function(){
+
+    var query = document.getElementById('Search-string').value;
+    var query_dict = {"q":query};
+    console.log(query_dict);
+    document.getElementById('Search-string').value = "";
+    callGetApi(query_dict,query)
+        .then((response)=>{
+            console.log("success");
+            console.log(response);
+            display_images(response['data']['images']);
+    }).catch((error) => {
+        console.log('an error occurred', error);
+    });
+}
+function callGetApi(query_dict,query){
+    var params = {'q': query};
+    return apigClient.searchGet(params, {},{});
+}
+
+function display_images(image_array){
+    var i;
+    if (image_array.length == 0){
+        alert("No results found based on your input.");
+    }
+    if (img_container.length != 0){
+        var p;
+        for(p = 0; p < img_container.length;p++){
+            var elementToBeRemoved = document.getElementById(img_container[p]);
+            elementToBeRemoved.parentNode.removeChild(elementToBeRemoved);
+        }
+        img_container = [];
+    }
+    for(i = 0; i < image_array.length; i++){
+        var image_url = image_array[i];
+        var img = document.createElement("img");
+        img.setAttribute("id",image_url);
+        img_container.push(image_url);
+        img.src = image_url;
+        document.body.appendChild(img);
+    }
+}
+
+///Part for uploading and adding tags for the image
+function collecting_tags_from_input(){
+    var tags_string = document.getElementById('Upload-tags').value;
+    console.log(tags_string);
+    document.getElementById('Upload-tags').value = "";
+    addPhoto(tags_string);
+}
+
+var albumBucketName = "photostorage-hw2";
+var IdentityPoolId = 'us-west-2:99a2e483-b84f-4d44-bb10-f31b199ca6d2';
+
+AWS.config.update({
+    region: 'us-west-2',
+    credentials: new AWS.CognitoIdentityCredentials({
+        IdentityPoolId: IdentityPoolId
+    })
+});
+
+var s3 = new AWS.S3({
+    params: { Bucket: albumBucketName }
+});
+
+function addPhoto(tags_string) {
+    var files = document.getElementById("file").files;
+    if (!files.length) {
+        return alert("Please choose a file to upload first.");
+    }
+    var file = files[0];
+    var fileName = file.name;
+    var photoKey = fileName;
+
+    // Use S3 ManagedUpload class as it supports multipart uploads
+    var upload = new AWS.S3.ManagedUpload({
+        params: {
+            //Bucket: albumBucketName,
+            Bucket: albumBucketName,
+            Key: photoKey,
+            Body: file,
+            Metadata:{"x-amz-meta-customLabels":tags_string }
+        }
+    });
+    var promise = upload.promise();
+    promise.then(
+        function(data) {
+            alert("Successfully uploaded photo.");
+        },
+        function(err) {
+            return alert(err.message);
+        }
+    );
+}
+
+///Part for audio to text
+var create_email = false;
+var final_transcript = '';
+var recognizing = false;
+var ignore_onend;
+var start_timestamp;
+if (!('webkitSpeechRecognition' in window)) {
+    upgrade();
+} else {
+    start_button.style.display = 'inline-block';
+    var recognition = new webkitSpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    recognition.onstart = function() {
+        recognizing = true;
+        //showInfo('info_speak_now');
+        start_img.src = 'mic-animate.gif';
+    };
+
+    recognition.onerror = function(event) {
+        if (event.error == 'no-speech') {
+            start_img.src = 'mic.gif';
+            showInfo('info_no_speech');
+            ignore_onend = true;
+        }
+        if (event.error == 'audio-capture') {
+            start_img.src = 'mic.gif';
+            showInfo('info_no_microphone');
+            ignore_onend = true;
+        }
+        if (event.error == 'not-allowed') {
+            if (event.timeStamp - start_timestamp < 100) {
+                showInfo('info_blocked');
+            } else {
+                showInfo('info_denied');
+            }
+            ignore_onend = true;
+        }
+    };
+
+    recognition.onend = function() {
+        recognizing = false;
+        if (ignore_onend) {
+            return;
+        }
+        start_img.src = 'mic.gif';
+        if (!final_transcript) {
+            //showInfo('info_start');
+            return;
+        }
+        //showInfo('');
+        if (window.getSelection) {
+            window.getSelection().removeAllRanges();
+            var range = document.createRange();
+            //range.selectNode(document.getElementById('final_span'));
+            range.selectNode(document.getElementById('Search-string'));
+            window.getSelection().addRange(range);
+        }
+    };
+
+    recognition.onresult = function(event) {
+        var interim_transcript = '';
+        for (var i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+                final_transcript += event.results[i][0].transcript;
+            } else {
+                interim_transcript += event.results[i][0].transcript;
+            }
+        }
+        final_transcript = capitalize(final_transcript);
+        //final_span.innerHTML = linebreak(final_transcript);
+        document.getElementById('Search-string').value = final_transcript;
+        console.log("asdkj");
+        //interim_span.innerHTML = linebreak(interim_transcript);
+        if (final_transcript || interim_transcript) {
+            showButtons('inline-block');
+        }
+    };
+}
+
+function upgrade() {
+    start_button.style.visibility = 'hidden';
+    showInfo('info_upgrade');
+}
+
+var two_line = /\n\n/g;
+var one_line = /\n/g;
+function linebreak(s) {
+    return s.replace(two_line, '<p></p>').replace(one_line, '<br>');
+}
+
+var first_char = /\S/;
+function capitalize(s) {
+    return s.replace(first_char, function(m) { return m.toUpperCase(); });
+}
+
+function startButton(event) {
+    if (recognizing) {
+        recognition.stop();
+        return;
+    }
+    final_transcript = '';
+    recognition.lang = 'en-US';
+    recognition.start();
+    ignore_onend = false;
+    //final_span.innerHTML = '';
+    //interim_span.innerHTML = '';
+    start_img.src = 'mic-slash.gif';
+    //showInfo('info_allow');
+    showButtons('none');
+    start_timestamp = event.timeStamp;
+    console.log(final_transcript)
+}
+
+function showInfo(s) {
+    if (s) {
+        for (var child = info.firstChild; child; child = child.nextSibling) {
+            if (child.style) {
+                child.style.display = child.id == s ? 'inline' : 'none';
+            }
+        }
+        info.style.visibility = 'visible';
+    } else {
+        info.style.visibility = 'hidden';
+    }
+}
+
+var current_style;
+function showButtons(style) {
+    if (style == current_style) {
+        return;
+    }
+    current_style = style;
+}
+</script>
